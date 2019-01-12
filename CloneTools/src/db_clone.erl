@@ -126,9 +126,16 @@ clone_dbs([Db|Dbs]) ->
                        ,[Db, length(Dbs)]),
             clone_account_db(wh_account:format_id(Db, 'encoded'));
         'false' ->
-            ?LOG_WHITE("cloning db ~s, ~p databases remaining~n"
-                       ,[Db, length(Dbs)]),
-            clone_db(wh_types:to_binary(uri_encode(Db)))
+            _ = case wh_account:is_account_mod(Db) of
+                'true' ->
+                    ?LOG_WHITE("cloning account modb ~s, ~p databases remaining~n"
+                               ,[Db, length(Dbs)]),
+                    clone_account_mod(wh_types:to_binary(uri_encode(Db)));
+                'false' ->
+                    ?LOG_WHITE("cloning db ~s, ~p databases remaining~n"
+                               ,[Db, length(Dbs)]),
+                    clone_db(wh_types:to_binary(uri_encode(Db)))
+            end
         end,
     clone_dbs(Dbs).
 
@@ -139,6 +146,21 @@ clone_db(Db) ->
             put('errors', []),
             _ = clone_all_docs(Db),
             %% _ = clone_attachments(Db),
+            [?LOG_RED("~s", [Error])
+             || Error <- get('errors')
+            ]
+    end.
+
+clone_account_mod(Db) ->
+    case create_db(Db) of
+        'false' -> 'ok';
+        'true' ->
+            put('errors', []),
+            _ = clone_design_docs(Db),
+            _ = clone_all_docs(Db),
+            _ = clone_filtered_docs(Db),
+            _ = clone_attachments(Db),
+            _ = clone_voicemail_boxes(Db),
             [?LOG_RED("~s", [Error])
              || Error <- get('errors')
             ]
@@ -237,6 +259,8 @@ find_missing_attachments(Db) ->
                              ,<<"_design/clone/_view/has_attachments?reduce=true&group=true">>
                             ]),
     TargetIds = get_ids(Target),
+    ?LOG_GREEN("SourceIDs: ~p", [get_ids(Source)]),
+    ?LOG_GREEN("TargetIDs: ~p", [TargetIds]),
     lists:foldl(fun({Id, Length}, Ids) ->
                         case props:get_value(Id, TargetIds) =/= Length of
                             'true' -> [Id|Ids];
